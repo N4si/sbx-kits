@@ -1,266 +1,55 @@
 schemaVersion: "2"
-kind: sandbox
+kind: mixin
 name: meko-agent
-displayName: Meko Multi-Agent Memory Sandbox
+displayName: Meko Multi-Agent Memory
 description: |
-  Sandbox for building multi-agent systems with Meko cross-agent memory.
-  Includes Anthropic SDK, LangGraph, and a Meko MCP client for persistent
-  memory handoff between agents. Demo shows researcher + synthesizer pattern.
-
-sandbox:
-  image: "docker/sandbox-templates:shell-docker"
-  aiFilename: AGENTS.md
-  entrypoint:
-    run: ["bash"]
-
-credentials:
-  - name: anthropic
-    apiKey:
-      inject:
-        - domain: api.anthropic.com
-          header: x-api-key
-          format: "%s"
-      sources:
-        env:
-          - ANTHROPIC_API_KEY
+  Mixin that wires the Meko MCP server into any sandbox agent.
+  Gives agents persistent cross-session memory, knowledge bases,
+  and multi-agent memory handoff via the Meko MCP server.
+  Authentication is handled via the sbx proxy — your API key
+  never enters the sandbox.
 
 caps:
   network:
     allow:
-      - download.docker.com
-      - archive.ubuntu.com
-      - security.ubuntu.com
-      - ports.ubuntu.com
-      - pypi.org
-      - pythonhosted.org
-      - files.pythonhosted.org
-      - github.com
-      - raw.githubusercontent.com
       - mcp.mekodata.ai
+      - registry.npmjs.org
 
 environment:
   variables:
-    PYTHONUNBUFFERED: "1"
+    MEKO_API_KEY: "mko-proxy-managed"
 
 commands:
   install:
-    - command: "apt-get update && apt-get install -y python3 python3-pip git curl build-essential"
-      description: "System dependencies"
-    - command: "pip3 install --break-system-packages anthropic langgraph httpx python-dotenv"
-      description: "Anthropic SDK, LangGraph, HTTP client for Meko"
+    - command: "apt-get update -qq && apt-get install -y -qq nodejs npm 2>/dev/null || true"
+      description: "Install Node.js for mcp-remote"
+    - command: "npm install -g mcp-remote --silent 2>/dev/null || true"
+      description: "Install mcp-remote for MCP server connectivity"
 
   initFiles:
-    - path: /home/agent/workspace/meko/__init__.py
+    - path: /home/agent/workspace/.mcp.json
       content: |
-        # Meko MCP client
-
-    - path: /home/agent/workspace/meko/client.py
-      content: |
-        import os
-        import httpx
-
-        MEKO_URL = os.getenv("MEKO_URL", "https://mcp.mekodata.ai/mcp")
-        MEKO_API_KEY = os.getenv("MEKO_API_KEY", "")
-        MEKO_DATAPACK_ID = os.getenv("MEKO_DATAPACK_ID", "")
-
-        def _headers():
-            return {
-                "Authorization": "Bearer " + MEKO_API_KEY,
-                "Content-Type": "application/json",
+        {
+          "mcpServers": {
+            "meko": {
+              "command": "npx",
+              "args": [
+                "-y",
+                "mcp-remote",
+                "https://mcp.mekodata.ai/mcp"
+              ]
             }
+          }
+        }
 
-        def add_memory(text, agent_id="default"):
-            payload = {
-                "method": "tools/call",
-                "params": {
-                    "name": "memory_add",
-                    "arguments": {
-                        "text": text,
-                        "datapack_id": MEKO_DATAPACK_ID,
-                        "scope": "admin",
-                        "metadata": {"agent_id": agent_id},
-                    },
-                },
-            }
-            resp = httpx.post(MEKO_URL, headers=_headers(), json=payload, timeout=30)
-            resp.raise_for_status()
-            return resp.json()
-
-        def search_memory(query, top_k=5):
-            payload = {
-                "method": "tools/call",
-                "params": {
-                    "name": "memory_search",
-                    "arguments": {
-                        "query": query,
-                        "datapack_id": MEKO_DATAPACK_ID,
-                        "top_k": top_k,
-                    },
-                },
-            }
-            resp = httpx.post(MEKO_URL, headers=_headers(), json=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("result", {}).get("memories", [])
-
-        def get_all_memories():
-            payload = {
-                "method": "tools/call",
-                "params": {
-                    "name": "memory_get_all",
-                    "arguments": {"datapack_id": MEKO_DATAPACK_ID},
-                },
-            }
-            resp = httpx.post(MEKO_URL, headers=_headers(), json=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("result", {}).get("memories", [])
-
-    - path: /home/agent/workspace/agents/__init__.py
+    - path: /home/agent/workspace/MEKO.md
       content: |
-        # Multi-agent modules
+        # Meko Multi-Agent Memory
 
-    - path: /home/agent/workspace/agents/researcher.py
-      content: |
-        import sys
-        import anthropic
-        sys.path.insert(0, '/home/agent/workspace')
-        from meko.client import add_memory
+        Meko is connected via MCP. Use it by mentioning Meko in your prompt:
+        - "save this to Meko"
+        - "search my Meko memories for X"
+        - "list my Meko datapacks"
 
-        client = anthropic.Anthropic()
-
-        def research(topic):
-            print("  Researching: " + topic)
-            message = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                messages=[{
-                    "role": "user",
-                    "content": "Research this topic and summarize the key findings concisely: " + topic
-                }]
-            )
-            summary = message.content[0].text
-            try:
-                add_memory(
-                    text="RESEARCH [" + topic + "]: " + summary,
-                    agent_id="researcher"
-                )
-                print("  Findings stored in Meko")
-            except Exception as e:
-                print("  Meko not configured, skipping: " + str(e))
-            return summary
-
-        if __name__ == "__main__":
-            print(research("YugabyteDB for AI agent state management"))
-
-    - path: /home/agent/workspace/agents/synthesizer.py
-      content: |
-        import sys
-        import anthropic
-        sys.path.insert(0, '/home/agent/workspace')
-        from meko.client import search_memory, add_memory
-
-        client = anthropic.Anthropic()
-
-        def synthesize(topic):
-            print("  Retrieving memories for: " + topic)
-            context = ""
-            try:
-                memories = search_memory(query=topic, top_k=5)
-                context = "\n".join(m.get("text", "") for m in memories)
-                print("  Retrieved " + str(len(memories)) + " memories from Meko")
-            except Exception as e:
-                print("  Meko not configured, proceeding without context: " + str(e))
-
-            if context:
-                prompt = "Based on this research context, write an executive report.\n\nCONTEXT:\n" + context + "\n\nTOPIC: " + topic + "\n\nStructure: Executive Summary, Key Findings, Recommendations, Next Steps."
-            else:
-                prompt = "Write an executive report on this topic: " + topic + "\n\nStructure: Executive Summary, Key Findings, Recommendations, Next Steps."
-
-            message = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            report = message.content[0].text
-            try:
-                add_memory(
-                    text="REPORT [" + topic + "]: " + report,
-                    agent_id="synthesizer"
-                )
-                print("  Report stored in Meko")
-            except Exception as e:
-                print("  Meko not configured, skipping: " + str(e))
-            return report
-
-        if __name__ == "__main__":
-            print(synthesize("YugabyteDB for AI agent state management"))
-
-    - path: /home/agent/workspace/demo.py
-      content: |
-        import os
-        import sys
-        sys.path.insert(0, '/home/agent/workspace')
-        from agents.researcher import research
-        from agents.synthesizer import synthesize
-        from meko.client import get_all_memories, MEKO_DATAPACK_ID
-
-        TOPIC = "stateful AI agents in distributed systems"
-
-        def run():
-            print("\n" + "="*55)
-            print("  Meko Multi-Agent Memory Demo")
-            print("="*55 + "\n")
-
-            if not os.getenv("MEKO_API_KEY"):
-                print("  NOTE: MEKO_API_KEY not set.")
-                print("  Agents will run but memory calls will be skipped.\n")
-
-            print("Step 1: Researcher Agent")
-            print("-" * 40)
-            research(TOPIC)
-            print()
-
-            print("Step 2: Synthesizer Agent")
-            print("-" * 40)
-            synthesize(TOPIC)
-            print()
-
-            print("Step 3: All Memories in Datapack")
-            print("-" * 40)
-            try:
-                memories = get_all_memories()
-                print("  Total memories stored: " + str(len(memories)))
-                for i, m in enumerate(memories, 1):
-                    agent = m.get("metadata", {}).get("agent_id", "unknown")
-                    preview = m.get("text", "")[:80]
-                    print("  [" + str(i) + "] " + agent + ": " + preview + "...")
-            except Exception as e:
-                print("  Could not retrieve memories: " + str(e))
-            print()
-
-            print("="*55)
-            print("  Demo complete!")
-            print("  Datapack: " + (MEKO_DATAPACK_ID or "(not set)"))
-            print("="*55 + "\n")
-
-        if __name__ == "__main__":
-            run()
-
-    - path: /home/agent/workspace/AGENTS.md
-      content: |
-        # Meko Multi-Agent Memory Sandbox
-
-        You are an AI agent with access to Meko for cross-agent memory persistence.
-
-        ## Available Tools
-        - Python 3 with Anthropic SDK, LangGraph, httpx
-        - Meko MCP client via meko/client.py
-
-        ## Demo Agents
-        - python agents/researcher.py
-        - python agents/synthesizer.py
-        - python demo.py
-
-        ## Setup
-        Set MEKO_API_KEY and MEKO_DATAPACK_ID on host before creating sandbox.
+        Your Meko API key is proxy-managed. The proxy injects it as an
+        API_KEY header on all outbound requests to mcp.mekodata.ai.
