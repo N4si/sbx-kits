@@ -6,8 +6,6 @@ description: |
   Mixin that wires the Meko MCP server into any sandbox agent.
   Gives agents persistent cross-session memory, knowledge bases,
   and multi-agent memory handoff via the Meko MCP server.
-  Authentication is handled via the sbx proxy — your API key
-  never enters the sandbox.
 
 caps:
   network:
@@ -24,32 +22,40 @@ commands:
     - command: "apt-get update -qq && apt-get install -y -qq nodejs npm 2>/dev/null || true"
       description: "Install Node.js for mcp-remote"
     - command: "npm install -g mcp-remote --silent 2>/dev/null || true"
-      description: "Install mcp-remote for MCP server connectivity"
+      description: "Install mcp-remote"
 
-  initFiles:
-    - path: /home/agent/workspace/.mcp.json
-      content: |
-        {
-          "mcpServers": {
-            "meko": {
-              "command": "npx",
-              "args": [
-                "-y",
-                "mcp-remote",
-                "https://mcp.mekodata.ai/mcp"
-              ]
+  startup:
+    - command:
+        - bash
+        - -c
+        - |
+          mkdir -p /home/agent/workspace
+          cat > /home/agent/workspace/.mcp.json << MCPEOF
+          {
+            "mcpServers": {
+              "meko": {
+                "command": "npx",
+                "args": [
+                  "-y",
+                  "mcp-remote",
+                  "https://mcp.mekodata.ai/mcp",
+                  "--header",
+                  "Authorization: Bearer ${MEKO_API_KEY}"
+                ]
+              }
             }
           }
-        }
+          MCPEOF
+          cat > /home/agent/workspace/MEKO.md << 'DOCEOF'
+          # Meko Multi-Agent Memory
 
-    - path: /home/agent/workspace/MEKO.md
-      content: |
-        # Meko Multi-Agent Memory
+          Meko is connected via MCP. Use it by mentioning Meko in your prompt:
+          - "save this to Meko"
+          - "search my Meko memories for X"
+          - "list my Meko datapacks"
 
-        Meko is connected via MCP. Use it by mentioning Meko in your prompt:
-        - "save this to Meko"
-        - "search my Meko memories for X"
-        - "list my Meko datapacks"
-
-        Your Meko API key is proxy-managed. The proxy injects it as an
-        API_KEY header on all outbound requests to mcp.mekodata.ai.
+          Your Meko API key is proxy-managed. The proxy injects it as an
+          Authorization: Bearer token on all outbound requests to
+          mcp.mekodata.ai.
+          DOCEOF
+      description: "Write Meko MCP config and MEKO.md usage guide"

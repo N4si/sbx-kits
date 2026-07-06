@@ -5,7 +5,9 @@
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.mekodata.ai/mcp"
+        "https://mcp.mekodata.ai/mcp",
+        "--header",
+        "Authorization: Bearer ${MEKO_API_KEY}"
       ]
     }
   }
