@@ -30,8 +30,9 @@ caps:
 
 environment:
   variables:
+    ANTHROPIC_API_KEY: "sk-ant-proxy-managed"
     PYTHONUNBUFFERED: "1"
-    ANTHROPIC_API_KEY: "proxy-managed"
+
 
 commands:
   install:
