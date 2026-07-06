@@ -27,6 +27,8 @@ caps:
       - raw.githubusercontent.com
       - cloud.yugabyte.com
       - docs.yugabyte.com
+      - "*.aws.yugabyte.cloud"
+      - us-east-1.5b18ff70-0210-425c-9a74-342b90ddabb5.aws.yugabyte.cloud
 
 environment:
   variables:
