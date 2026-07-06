@@ -1,0 +1,234 @@
+schemaVersion: "2"
+kind: sandbox
+name: yugabyte-agent
+displayName: YugabyteDB AI Agent Sandbox
+description: |
+  Sandbox for building stateful AI agents backed by YugabyteDB.
+  Includes Anthropic SDK, LangGraph, psycopg for distributed SQL,
+  and demo agents for trend analysis and compliance auditing.
+
+sandbox:
+  image: "docker/sandbox-templates:shell-docker"
+  aiFilename: AGENTS.md
+  entrypoint:
+    run: ["bash"]
+
+credentials:
+  - name: anthropic
+    apiKey:
+      inject:
+        - domain: api.anthropic.com
+          header: x-api-key
+          format: "%s"
+      sources:
+        env:
+          - ANTHROPIC_API_KEY
+
+caps:
+  network:
+    allow:
+      - download.docker.com
+      - archive.ubuntu.com
+      - security.ubuntu.com
+      - ports.ubuntu.com
+      - pypi.org
+      - pythonhosted.org
+      - files.pythonhosted.org
+      - github.com
+      - raw.githubusercontent.com
+      - cloud.yugabyte.com
+      - docs.yugabyte.com
+
+environment:
+  variables:
+    PYTHONUNBUFFERED: "1"
+
+commands:
+  install:
+    - command: "apt-get update && apt-get install -y python3 python3-pip postgresql-client libpq-dev git curl build-essential"
+      description: "System dependencies"
+    - command: "pip3 install --break-system-packages anthropic langgraph psycopg[binary] python-dotenv"
+      description: "Anthropic SDK, LangGraph, YugabyteDB driver"
+
+  initFiles:
+    - path: /home/agent/workspace/agents/__init__.py
+      content: |
+        # YugabyteDB AI Agent modules
+
+    - path: /home/agent/workspace/utils/__init__.py
+      content: |
+        # Utilities
+
+    - path: /home/agent/workspace/utils/db.py
+      content: |
+        """
+        YugabyteDB connection utility.
+        Set YB_CONNECTION_STRING before creating the sandbox.
+        """
+        import os
+        import psycopg
+        from typing import List, Dict
+
+        class YugabyteDB:
+            def __init__(self):
+                self.conn_string = os.getenv(
+                    "YB_CONNECTION_STRING",
+                    "postgresql://yugabyte:yugabyte@localhost:5433/yugabyte"
+                )
+                self._conn = None
+
+            def connect(self):
+                self._conn = psycopg.connect(self.conn_string)
+                print("Connected to YugabyteDB")
+
+            def execute(self, sql: str, params: tuple = ()) -> List[Dict]:
+                if not self._conn:
+                    self.connect()
+                with self._conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    if cur.description:
+                        cols = [d[0] for d in cur.description]
+                        return [dict(zip(cols, row)) for row in cur.fetchall()]
+                    self._conn.commit()
+                    return []
+
+            def close(self):
+                if self._conn:
+                    self._conn.close()
+
+        db = YugabyteDB()
+
+    - path: /home/agent/workspace/agents/trend_analyzer.py
+      content: |
+        """
+        Trend Analysis Agent
+        Uses Anthropic SDK to analyze financial market trends.
+        """
+        import json
+        import anthropic
+
+        client = anthropic.Anthropic()
+
+        def analyze_trends(symbol: str, timeframe: str = "30d") -> dict:
+            print(f"  Analyzing {symbol} over {timeframe}...")
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{
+                    "role": "user",
+                    "content": f"Analyze market trends for {symbol} over the past {timeframe}. Cover: price momentum, volume patterns, key risk factors. Be concise."
+                }]
+            )
+            result = message.content[0].text
+            print(f"  Analysis complete")
+            return {"symbol": symbol, "timeframe": timeframe, "analysis": result}
+
+        if __name__ == "__main__":
+            result = analyze_trends("AAPL", "30d")
+            print(json.dumps(result, indent=2))
+
+    - path: /home/agent/workspace/agents/compliance_agent.py
+      content: |
+        """
+        Compliance Auditing Agent
+        Audits an entity against a regulatory framework.
+        """
+        import json
+        import anthropic
+
+        client = anthropic.Anthropic()
+
+        def audit_compliance(entity: str, framework: str = "MAS") -> dict:
+            print(f"  Auditing {entity} against {framework}...")
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{
+                    "role": "user",
+                    "content": f"Audit {entity} for compliance with {framework} framework. Cover: KYC/AML, transaction monitoring, data protection. Return: status (Pass/Fail/Partial), risk areas, recommendations."
+                }]
+            )
+            result = message.content[0].text
+            print(f"  Audit complete")
+            return {"entity": entity, "framework": framework, "audit": result}
+
+        if __name__ == "__main__":
+            result = audit_compliance("Acme Fintech", "MAS")
+            print(json.dumps(result, indent=2))
+
+    - path: /home/agent/workspace/demo.py
+      content: |
+        """
+        Demo: YugabyteDB Agent Kit
+        Runs trend analysis + compliance audit, stores results to YugabyteDB.
+        """
+        import json
+        import sys
+        sys.path.insert(0, '/home/agent/workspace')
+        from agents.trend_analyzer import analyze_trends
+        from agents.compliance_agent import audit_compliance
+        from utils.db import db
+
+        def run():
+            print("\n" + "="*50)
+            print("  YugabyteDB + Claude SDK Demo")
+            print("="*50 + "\n")
+
+            print("Step 1: Trend Analysis")
+            print("-" * 40)
+            trend = analyze_trends("AAPL", "30d")
+            print()
+
+            print("Step 2: Compliance Audit")
+            print("-" * 40)
+            audit = audit_compliance("Demo Corp", "MAS")
+            print()
+
+            print("Step 3: Persist to YugabyteDB")
+            print("-" * 40)
+            try:
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS agent_results (
+                        id SERIAL PRIMARY KEY,
+                        agent TEXT,
+                        result JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                db.execute(
+                    "INSERT INTO agent_results (agent, result) VALUES (%s, %s)",
+                    ("trend_analyzer", json.dumps(trend))
+                )
+                db.execute(
+                    "INSERT INTO agent_results (agent, result) VALUES (%s, %s)",
+                    ("compliance_agent", json.dumps(audit))
+                )
+                print("  Results saved to agent_results table")
+            except Exception as e:
+                print(f"  DB not connected (set YB_CONNECTION_STRING): {e}")
+            print()
+
+            print("="*50)
+            print("  Demo complete!")
+            print("="*50 + "\n")
+
+        if __name__ == "__main__":
+            run()
+
+    - path: /home/agent/workspace/AGENTS.md
+      content: |
+        # YugabyteDB AI Agent Sandbox
+
+        You are an AI agent with access to YugabyteDB for persistent state storage.
+
+        ## Available Tools
+        - Python 3 with Anthropic SDK, LangGraph, psycopg
+        - YugabyteDB (PostgreSQL-compatible) via utils/db.py
+
+        ## Demo Agents
+        - `python agents/trend_analyzer.py` — financial trend analysis
+        - `python agents/compliance_agent.py` — regulatory compliance audit
+        - `python demo.py` — run both agents end-to-end
+
+        ## Database
+        Set YB_CONNECTION_STRING to connect to your YugabyteDB instance.
